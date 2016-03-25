@@ -1,9 +1,24 @@
+//! Threadsafe garbage collector (the Orc<T> type).
+//!
+//! The Orc<T> type provides shared ownership over an immutable value that is
+//! in stored in a preallocated memory area.
+//! As soon as the last reference to a stored value is gone the value is dropped. 
+//! In addition to that cycles are reclaimed if the space is needed for
+//! new allocations.
+//!
+//! While there may be some useful applications in pure rust programms for this
+//! of memory managment scheme, the intended use case is garbage collection for
+//! unityped (speak: dynamic) languages written in and tightly integrated with
+//! rust.
+
 use std::mem::transmute;
 use std::ops::Deref;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::marker::PhantomData;
 use std::marker::Sync;
 use std::cell::Cell;
+
+// constants
 
 // change to const PTR_SIZE: usize = size_of::<usize>() as soon it's a const fn
 #[cfg(target_pointer_width = "32")]
@@ -13,19 +28,8 @@ const PTR_SIZE: usize = 8;
 
 const MAX_WEIGHT_EXP: u8 = PTR_SIZE as u8 * 8 - 1;
 
-
-pub struct OrcPool<T> {
-    heap: Vec<OrcInner<T>>,
-}
-
-enum OrcInner<T> {
-    Some {
-        weight: AtomicUsize,
-        data: T,
-    },
-    None,
-}
-
+// orc pointer type
+//
 pub struct Orc<'a, T: 'a> {
     pointer_data: [u8; PTR_SIZE - 1], // the ptr is in little endian byteorder
     weight_exp: Cell<u8>,
@@ -88,13 +92,29 @@ impl<'a, T> Deref for Orc<'a, T> {
     }
 }
 
-impl<'a, T> OrcPool<T> {
-    pub fn new() -> OrcPool<T> {
+// wrapper around the type T, that is saved in the heap
+//
+enum OrcInner<T> {
+    Some {
+        weight: AtomicUsize,
+        data: T,
+    },
+    None,
+}
+
+// the heap that holds all allocated values
+//
+pub struct OrcHeap<T> {
+    heap: Vec<OrcInner<T>>,
+}
+
+impl<'a, T> OrcHeap<T> {
+    pub fn new() -> OrcHeap<T> {
         const DEFAULT_HEAP_SIZE: usize = 16;
-        OrcPool::<T>::with_capacity(DEFAULT_HEAP_SIZE)
+        OrcHeap::<T>::with_capacity(DEFAULT_HEAP_SIZE)
     }
 
-    pub fn with_capacity(capacity: usize) -> OrcPool<T> {
+    pub fn with_capacity(capacity: usize) -> OrcHeap<T> {
         let mut heap = Vec::with_capacity(capacity);
         // it is important that no other push operations on any of theses vectors are performed
         for _ in 0..capacity {
@@ -104,7 +124,7 @@ impl<'a, T> OrcPool<T> {
         let (_, weight) = deconstruct_pointer(heap.iter().nth(capacity - 1).unwrap());
         assert_eq!(weight, 0);
 
-        OrcPool::<T> { heap: heap }
+        OrcHeap::<T> { heap: heap }
     }
 
     pub fn alloc(&'a self, value: T) -> Result<Orc<T>, &'static str> {
@@ -141,7 +161,7 @@ impl<'a, T> OrcPool<T> {
 
 
 // helper functions
-
+//
 #[inline(always)]
 fn deconstruct_pointer<T>(p: &OrcInner<T>) -> ([u8; PTR_SIZE - 1], u8) {
     unsafe {
@@ -171,6 +191,8 @@ fn two_two_the(exp: u8) -> usize {
     1usize << exp
 }
 
+// unit tests
+//
 #[test]
 fn test_two_two_the() {
     assert_eq!(two_two_the(0), 1);
@@ -178,9 +200,12 @@ fn test_two_two_the() {
     assert_eq!(two_two_the(8), 256);
 }
 
+
+// functional test
+//
 #[cfg(test)]
 mod test {
-    use OrcPool;
+    use OrcHeap;
     use std::cell::Cell;
 
     struct DropTest<'a>(&'a Cell<usize>);
@@ -198,35 +223,33 @@ mod test {
         let test_size = 1000;
         let counter = Cell::new(test_size);
 
-        let pool = OrcPool::with_capacity(test_size);
+        let heap = OrcHeap::with_capacity(test_size);
 
         for _ in 0..test_size {
-            let o = pool.alloc(DropTest(&counter)).unwrap();
+            let o = heap.alloc(DropTest(&counter)).unwrap();
         }
         assert_eq!(counter.get(), 0);
     }
 
     #[test]
     #[allow(unused_variables)]
-    fn test_pool_freed() {
+    fn test_heap_freed() {
         let test_size = 2;
         let counter = Cell::new(5);
 
-        let pool = OrcPool::with_capacity(test_size);
+        let heap = OrcHeap::with_capacity(test_size);
 
         {
-        	let a = pool.alloc(DropTest(&counter)).unwrap();
-        	let b = pool.alloc(DropTest(&counter)).unwrap();
+            let a = heap.alloc(DropTest(&counter)).unwrap();
+            let b = heap.alloc(DropTest(&counter)).unwrap();
         }
-        // now the pool should be freed and the allocations should be possible
-        let c = pool.alloc(DropTest(&counter)).unwrap();
-        let d = pool.alloc(DropTest(&counter)).unwrap();
+        // now the heap should be freed and the allocations should be possible
+        let c = heap.alloc(DropTest(&counter)).unwrap();
+        let d = heap.alloc(DropTest(&counter)).unwrap();
         assert_eq!(counter.get(), 3); // a and b are dropped
 
         // and this must fail
-        assert!(pool.alloc(DropTest(&counter)).is_err())
-
-
+        assert!(heap.alloc(DropTest(&counter)).is_err())
     }
 
 

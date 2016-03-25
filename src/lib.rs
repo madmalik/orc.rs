@@ -1,3 +1,16 @@
+//! Threadsafe garbage collector (the Orc<T> type).
+//!
+//! The Orc<T> type provides shared ownership over an immutable value that is
+//! in stored in a preallocated memory area.
+//! As soon as the last reference to a stored value is gone the value is dropped.
+//! In addition to that cycles are reclaimed if the space is needed for
+//! new allocations.
+//!
+//! While there may be some useful applications in pure rust programms for this
+//! of memory managment scheme, the intended use case is garbage collection for
+//! unityped (speak: dynamic) languages written in and tightly integrated with
+//! rust.
+
 use std::mem::transmute;
 use std::ops::Deref;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -15,7 +28,7 @@ const PTR_SIZE: usize = 8;
 
 const MAX_WEIGHT_EXP: u8 = PTR_SIZE as u8 * 8 - 1;
 
-// orc pointer type 
+// orc pointer type
 //
 pub struct Orc<'a, T: 'a> {
     pointer_data: [u8; PTR_SIZE - 1], // the ptr is in little endian byteorder
@@ -79,7 +92,7 @@ impl<'a, T> Deref for Orc<'a, T> {
     }
 }
 
-// wrapper around the type T, that is saved in the heap 
+// wrapper around the type T, that is saved in the heap
 //
 enum OrcInner<T> {
     Some {
@@ -89,7 +102,7 @@ enum OrcInner<T> {
     None,
 }
 
-// the heap that holds all allocated values 
+// the heap that holds all allocated values
 //
 pub struct OrcHeap<T> {
     heap: Vec<OrcInner<T>>,
