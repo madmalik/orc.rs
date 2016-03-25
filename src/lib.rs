@@ -10,6 +10,7 @@
 //! of memory managment scheme, the intended use case is garbage collection for
 //! unityped (speak: dynamic) languages written in and tightly integrated with
 //! rust.
+//!
 
 use std::mem::transmute;
 use std::ops::Deref;
@@ -28,8 +29,7 @@ const PTR_SIZE: usize = 8;
 
 const MAX_WEIGHT_EXP: u8 = PTR_SIZE as u8 * 8 - 1;
 
-// orc pointer type
-//
+/// A pointer into an OrcHeap. Can be shared across threads.
 pub struct Orc<'a, T: 'a> {
     pointer_data: [u8; PTR_SIZE - 1], // the ptr is in little endian byteorder
     weight_exp: Cell<u8>,
@@ -102,13 +102,18 @@ enum OrcInner<T> {
     None,
 }
 
-// the heap that holds all allocated values
-//
+// The heap that holds all allocated values
 pub struct OrcHeap<T> {
     heap: Vec<OrcInner<T>>,
 }
 
 impl<'a, T> OrcHeap<T> {
+	/// Creates a new Heap of sensible size (for certain definitions of sensible)
+	/// # Example:
+	/// ```
+	/// use orc::OrcHeap;
+	/// let heap = OrcHeap::<usize>::new();
+	/// ```
     pub fn new() -> OrcHeap<T> {
         const DEFAULT_HEAP_SIZE: usize = 16;
         OrcHeap::<T>::with_capacity(DEFAULT_HEAP_SIZE)
