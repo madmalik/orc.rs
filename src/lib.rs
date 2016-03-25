@@ -215,8 +215,8 @@ mod test {
         let pool = OrcPool::with_capacity(test_size);
 
         {
-        	let a = pool.alloc(DropTest(&counter)).unwrap();
-        	let b = pool.alloc(DropTest(&counter)).unwrap();
+            let a = pool.alloc(DropTest(&counter)).unwrap();
+            let b = pool.alloc(DropTest(&counter)).unwrap();
         }
         // now the pool should be freed and the allocations should be possible
         let c = pool.alloc(DropTest(&counter)).unwrap();
