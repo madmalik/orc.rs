@@ -2,8 +2,8 @@ use std::mem::transmute;
 use std::ops::Deref;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::marker::PhantomData;
-use std::cell::Cell;
 use std::marker::Sync;
+use std::cell::Cell;
 
 // change to const PTR_SIZE: usize = size_of::<usize>() as soon it's a const fn
 #[cfg(target_pointer_width = "32")]
@@ -181,21 +181,36 @@ fn test_two_two_the() {
 #[cfg(test)]
 mod test {
 	use ::OrcPool;
+	use std::cell::Cell;
 
-	struct PanicOnDrop(usize);
+	struct DropTest<'a>(&'a Cell<usize>);
 
-	impl Drop for PanicOnDrop {
+	impl<'a> Drop for DropTest<'a> {
 	    fn drop(&mut self) {
-	    	panic!("drop");
+	    	let v = self.0.get();
+	    	self.0.set(v-1);
 	    }
 	}
 
 	#[test]
-	#[should_panic]
 	#[allow(unused_variables)]
 	fn test_drop() {
-		let pool = OrcPool::new();
-		let p = pool.alloc(PanicOnDrop(0));
+		let test_size = 1000;
+		let counter = Cell::new(test_size);
+		
+
+		assert_eq!(counter.get(), test_size);
+
+		let pool = OrcPool::with_capacity(test_size);
+
+		for _ in 0 .. test_size {
+			let o = pool.alloc(DropTest(&counter)).unwrap();
+		}
+		assert_eq!(counter.get(), 0);
 	}
+
+
+
+
 
 }
