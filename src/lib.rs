@@ -1,4 +1,4 @@
-//! Threadsafe garbage collector (the Orc<T> type).
+//! Threadsafe garbage collector (the `Orc<T> type).
 //!
 //! The Orc<T> type provides shared ownership over an immutable value that is
 //! in stored in a preallocated memory area.
