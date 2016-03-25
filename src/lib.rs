@@ -208,16 +208,25 @@ mod test {
 
     #[test]
     #[allow(unused_variables)]
-    fn test_drop() {
-        let test_size = 1000;
-        let counter = Cell::new(test_size);
+    fn test_pool_freed() {
+        let test_size = 2;
+        let counter = Cell::new(5);
 
         let pool = OrcPool::with_capacity(test_size);
 
-        for _ in 0..test_size {
-            let o = pool.alloc(DropTest(&counter)).unwrap();
+        {
+        	let a = pool.alloc(DropTest(&counter)).unwrap();
+        	let b = pool.alloc(DropTest(&counter)).unwrap();
         }
-        assert_eq!(counter.get(), 0);
+        // now the pool should be freed and the allocations should be possible
+        let c = pool.alloc(DropTest(&counter)).unwrap();
+        let d = pool.alloc(DropTest(&counter)).unwrap();
+        assert_eq!(counter.get(), 3); // a and b are dropped
+
+        // and this must fail
+        assert!(pool.alloc(DropTest(&counter)).is_err())
+
+
     }
 
 
