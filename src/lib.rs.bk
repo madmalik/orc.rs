@@ -203,7 +203,7 @@ mod test {
         for _ in 0..test_size {
             let o = pool.alloc(DropTest(&counter)).unwrap();
         }
-        assert_eq!(counter.get(), 0);
+        assert_eq!(counter.get(),0);
     }
 
     #[test]
