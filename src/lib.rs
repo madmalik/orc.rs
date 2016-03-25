@@ -1,4 +1,4 @@
-//! Threadsafe garbage collector (the `Orc<T> type).
+//! Threadsafe garbage collector (the `Orc<T>` type).
 //!
 //! The Orc<T> type provides shared ownership over an immutable value that is
 //! in stored in a preallocated memory area.
@@ -107,7 +107,9 @@ pub struct OrcHeap<T> {
     heap: Vec<OrcInner<T>>,
 }
 
+
 impl<'a, T> OrcHeap<T> {
+
 	/// Creates a new Heap of sensible size (for certain definitions of sensible)
 	/// # Example:
 	/// ```
@@ -119,6 +121,12 @@ impl<'a, T> OrcHeap<T> {
         OrcHeap::<T>::with_capacity(DEFAULT_HEAP_SIZE)
     }
 
+	/// Creates a new Heap of a user defined size
+	/// # Example:
+	/// ```
+	/// use orc::OrcHeap;
+	/// let heap = OrcHeap::<usize>::with_capacity(42);
+	/// ```
     pub fn with_capacity(capacity: usize) -> OrcHeap<T> {
         let mut heap = Vec::with_capacity(capacity);
         // it is important that no other push operations on any of theses vectors are performed
@@ -132,6 +140,13 @@ impl<'a, T> OrcHeap<T> {
         OrcHeap::<T> { heap: heap }
     }
 
+
+	/// Allocates a Value in the heap.
+	/// # Example:
+	/// ```
+	/// use orc::OrcHeap;
+	/// let heap = OrcHeap::<AtomicUsize>::with_capacity(42);
+	/// ```
     pub fn alloc(&'a self, value: T) -> Result<Orc<T>, &'static str> {
         // find an empty slot
         if let Some(position) = (&self.heap).iter().position(|x| {
