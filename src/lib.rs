@@ -1,9 +1,9 @@
 use std::mem::transmute;
-use std::fmt::Debug;
 use std::ops::Deref;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::marker::PhantomData;
 use std::cell::Cell;
+use std::marker::Sync;
 
 // change to const PTR_SIZE: usize = size_of::<usize>() as soon it's a const fn
 #[cfg(target_pointer_width = "32")]
@@ -14,18 +14,10 @@ const PTR_SIZE: usize = 8;
 const MAX_WEIGHT_EXP: u8 = PTR_SIZE as u8 * 8 - 1;
 
 
-pub struct Arena<T> {
+pub struct OrcPool<T> {
     heap: Vec<OrcInner<T>>
 }
 
-// Debug
-impl<'a, T> Drop for Arena<T> {
-    fn drop(&mut self) {
-        println!("Drop Arena");
-    }
-}
-
-#[derive(Debug)]
 enum OrcInner<T> {
     Some{
         weight: AtomicUsize,
@@ -34,21 +26,16 @@ enum OrcInner<T> {
     None,
 }
 
-
-
-#[derive(Debug)]
 pub struct Orc<'a, T: 'a> {
 	pointer_data: [u8; PTR_SIZE-1], // the ptr is in little endian byteorder
 	weight_exp: Cell<u8>,
 	lifetime_and_type: PhantomData<&'a T>
 }
 
+unsafe impl<'a, T> Sync for Orc<'a, T> {}
 
 impl<'a, T> Drop for Orc<'a, T> { 
 	fn drop(&mut self) {
-		// Debug
-		println!("Drop Orc");
-
     	if self.weight_exp.get() == MAX_WEIGHT_EXP {
     		let slot = construct_pointer_to_mut::<T>(self.pointer_data, 0);
 			unsafe {
@@ -103,28 +90,29 @@ impl<'a, T> Deref for Orc<'a, T> {
     }
 }
 
-impl<'a, T: Debug> Arena<T> { // TODO: Remove debug trait
-    pub fn new() -> Arena<T> {
-		const DEFAULT_HEAP_SIZE: usize = 10;
+impl<'a, T> OrcPool<T> {
 
-		let mut heap = Vec::with_capacity(DEFAULT_HEAP_SIZE);
+	pub fn new() -> OrcPool<T> {
+		const DEFAULT_HEAP_SIZE: usize = 16;
+		OrcPool::<T>::with_capacity(DEFAULT_HEAP_SIZE)
+	}
+
+    pub fn with_capacity(capacity: usize) -> OrcPool<T> {
+		let mut heap = Vec::with_capacity(capacity);
 		// it is important that no other push operations on any of theses vectors are performed
-		for _ in 0 .. DEFAULT_HEAP_SIZE {
+		for _ in 0 .. capacity {
 			heap.push(OrcInner::None);
 		}
 		// make sure that all pointers have enough headroom to store the weight
-		let (_, weight) = deconstruct_pointer(heap.iter().nth(DEFAULT_HEAP_SIZE-1).unwrap());
+		let (_, weight) = deconstruct_pointer(heap.iter().nth(capacity-1).unwrap());
 		assert_eq!(weight, 0);
 
-		println!("new arena {:?}", deconstruct_pointer(heap.iter().nth(DEFAULT_HEAP_SIZE-1).unwrap()));	
-
-        Arena::<T> {
+        OrcPool::<T> {
             heap: heap,
         }
     }
     
-    pub fn alloc(&'a self, value: T) -> Orc<T> {
-
+    pub fn alloc(&'a self, value: T) -> Result<Orc<T>, &'static str>  {
     	// find an empty slot
     	if let Some(position) = (&self.heap).iter().position(|x| match x { &OrcInner::None => true, _ => false} ) {
 		    unsafe {
@@ -140,14 +128,14 @@ impl<'a, T: Debug> Arena<T> { // TODO: Remove debug trait
 		        let (pointer_data, _) = deconstruct_pointer(self.heap.get_unchecked(position));
 
 		        // give out the reference with max weight
-		        return Orc::<'a, T> {
+		        return Ok(Orc::<'a, T> {
 		            pointer_data: pointer_data,
 		            weight_exp: Cell::new(MAX_WEIGHT_EXP),
 		            lifetime_and_type: PhantomData,
-		        }
+		        })
 		    }
     	}
-		panic!("gc collection");
+    	Err("Out of memory")
     }
 }
 
@@ -190,7 +178,24 @@ fn test_two_two_the() {
 	assert_eq!(two_two_the(8), 256);
 }
 
+#[cfg(test)]
+mod test {
+	use ::OrcPool;
 
-// #[test]
-// fn it_works() {
-// }
+	struct PanicOnDrop(usize);
+
+	impl Drop for PanicOnDrop {
+	    fn drop(&mut self) {
+	    	panic!("drop");
+	    }
+	}
+
+	#[test]
+	#[should_panic]
+	#[allow(unused_variables)]
+	fn test_drop() {
+		let pool = OrcPool::new();
+		let p = pool.alloc(PanicOnDrop(0));
+	}
+
+}

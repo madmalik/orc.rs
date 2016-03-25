@@ -1,7 +1,7 @@
 extern crate orc;
 extern crate crossbeam;
 
-use orc::Arena;
+use orc::OrcPool;
 
 
 
@@ -24,28 +24,29 @@ impl Drop for TestType {
 fn main() {
 
 
-    let a = Arena::<Vec<TestType>>::new();
+    let a = OrcPool::<Vec<TestType>>::new();
     
-    let b = a.alloc(vec![TestType::new(1), TestType::new(2), TestType::new(3)]);
+    let b = a.alloc(vec![TestType::new(1), TestType::new(2), TestType::new(3)]).unwrap();
+	println!("{:?}", *b);	
+
     let c = b.clone();
-    let d = b.clone();
 
 
-	println!("{:?}", b);	
-	println!("{:?}", c);	
-	println!("{:?}", d);	
+	// println!("{:?}", b);	
+	// println!("{:?}", c);	
 
 	    
 	// crossbeam::scope(|scope| {
 	//     let second_thread_handle = scope.spawn(|| {
 	//     	let d = a.alloc(vec![TestType::new(7), TestType::new(8), TestType::new(9)]);
+	//     	println!("{:?}", c.clone()); 	
 	//     	println!("From second thread");
-	// 	    // println!("{:?}", c);	
+	// 	    println!("{:?}", d);	
 	// 	    d
 	//     });
 
 	//    	let d = second_thread_handle.join();
-	// 	// println!("value d created in 2. thread {:?}", d);	
+	// 	println!("value d created in 2. thread {:?}", d);	
 
 	// });
 }
