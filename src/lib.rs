@@ -241,35 +241,35 @@ mod test {
     #[allow(unused_variables)]
     fn test_drop() {
         let test_size = 1000;
-        let counter = Cell::new(test_size);
+        let values_in_existence = Cell::new(test_size);
 
         let heap = OrcHeap::with_capacity(test_size);
 
         for _ in 0..test_size {
-            let o = heap.alloc(DropTest(&counter)).unwrap();
+            let o = heap.alloc(DropTest(&values_in_existence)).unwrap();
         }
-        assert_eq!(counter.get(), 0);
+        assert_eq!(values_in_existence.get(), 0);
     }
 
     #[test]
     #[allow(unused_variables)]
     fn test_heap_freed() {
         let test_size = 2;
-        let counter = Cell::new(5);
+        let values_in_existence = Cell::new(5);
 
         let heap = OrcHeap::with_capacity(test_size);
 
         {
-            let a = heap.alloc(DropTest(&counter)).unwrap();
-            let b = heap.alloc(DropTest(&counter)).unwrap();
+            let a = heap.alloc(DropTest(&values_in_existence)).unwrap();
+            let b = heap.alloc(DropTest(&values_in_existence)).unwrap();
         }
         // now the heap should be freed and the allocations should be possible
-        let c = heap.alloc(DropTest(&counter)).unwrap();
-        let d = heap.alloc(DropTest(&counter)).unwrap();
-        assert_eq!(counter.get(), 3); // a and b are dropped
+        let c = heap.alloc(DropTest(&values_in_existence)).unwrap();
+        let d = heap.alloc(DropTest(&values_in_existence)).unwrap();
+        assert_eq!(values_in_existence.get(), 3); // a and b are dropped
 
         // and this must fail
-        assert!(heap.alloc(DropTest(&counter)).is_err())
+        assert!(heap.alloc(DropTest(&values_in_existence)).is_err())
     }
 
 
