@@ -6,3 +6,6 @@ authors = ["tellen <matthias.tellen@gmail.com>"]
 [lib]
 name = "orc"
 path = "src/lib.rs"
+
+[dependencies]
+crossbeam = "0.2.5"

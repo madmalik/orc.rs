@@ -15,6 +15,7 @@
 use std::mem::transmute;
 use std::ops::Deref;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 use std::marker::PhantomData;
 use std::marker::Sync;
 use std::cell::Cell;
@@ -32,7 +33,7 @@ const MAX_WEIGHT_EXP: u8 = PTR_SIZE as u8 * 8 - 1;
 /// A pointer into an OrcHeap. Can be shared across threads.
 pub struct Orc<'a, T: 'a> {
     pointer_data: [u8; PTR_SIZE - 1], // the ptr is in little endian byteorder
-    weight_exp: Cell<u8>,
+    weight_exp: Cell<u8>,	
     lifetime_and_type: PhantomData<&'a T>,
 }
 
@@ -107,9 +108,9 @@ pub struct OrcHeap<T> {
     heap: Vec<OrcInner<T>>,
 }
 
+unsafe impl<'a, T> Sync for OrcHeap<T> {}
 
 impl<'a, T> OrcHeap<T> {
-
 	/// Creates a new Heap of sensible size (for certain definitions of sensible)
 	/// # Example:
 	/// ```
@@ -142,13 +143,9 @@ impl<'a, T> OrcHeap<T> {
 
 
 	/// Allocates a Value in the heap.
-	/// # Example:
-	/// ```
-	/// use orc::OrcHeap;
-	/// let heap = OrcHeap::<AtomicUsize>::with_capacity(42);
-	/// ```
     pub fn alloc(&'a self, value: T) -> Result<Orc<T>, &'static str> {
         // find an empty slot
+
         if let Some(position) = (&self.heap).iter().position(|x| {
             match x {
                 &OrcInner::None => true,
@@ -224,7 +221,7 @@ fn test_two_two_the() {
 // functional test
 //
 #[cfg(test)]
-mod test {
+mod test_drop {
     use OrcHeap;
     use std::cell::Cell;
 
@@ -271,6 +268,33 @@ mod test {
         // and this must fail
         assert!(heap.alloc(DropTest(&values_in_existence)).is_err())
     }
+}
 
+#[cfg(test)]
+mod test_concurrency {
+	// this test may not fail, even if something is wrong with the concurrent
+	// allocation behaviour. But with a high enough test_size, it will most
+	// likely blow up. 
+	extern crate crossbeam;
+    use OrcHeap;
 
+    #[test]
+    fn test_concurrency() {
+    	extern crate crossbeam;
+		let test_size = 1000;
+
+        let heap = OrcHeap::with_capacity(test_size*10);
+
+		crossbeam::scope(|scope| {
+		    for _ in 0..test_size {
+		        scope.spawn(|| {
+		        	for j in 0..test_size {
+			        	if let Ok(v) = heap.alloc(j) {
+			        		assert_eq!(*v, j);
+			        	}
+		        	}
+		        });
+		    }
+		});
+    }
 }
