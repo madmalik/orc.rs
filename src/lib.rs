@@ -12,7 +12,7 @@
 //! rust.
 //!
 
-use std::mem::transmute;
+use std::mem::{transmute, size_of, transmute_copy, forget};
 use std::ops::Deref;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
@@ -29,11 +29,12 @@ const PTR_SIZE: usize = 4;
 const PTR_SIZE: usize = 8;
 
 const MAX_WEIGHT_EXP: u8 = PTR_SIZE as u8 * 8 - 1;
+const MAX_WEIGHT: usize = 1usize << MAX_WEIGHT_EXP; // 2^MAX_WEIGHT_EXP
 
 /// A pointer into an OrcHeap. Can be shared across threads.
 pub struct Orc<'a, T: 'a> {
     pointer_data: [u8; PTR_SIZE - 1], // the ptr is in little endian byteorder
-    weight_exp: Cell<u8>,	
+    weight_exp: Cell<u8>,
     lifetime_and_type: PhantomData<&'a T>,
 }
 
@@ -41,25 +42,9 @@ unsafe impl<'a, T> Sync for Orc<'a, T> {}
 
 impl<'a, T> Drop for Orc<'a, T> {
     fn drop(&mut self) {
-        if self.weight_exp.get() == MAX_WEIGHT_EXP {
-            let slot = construct_pointer_to_mut::<T>(self.pointer_data, 0);
-            unsafe { *slot = OrcInner::None }
-        } else {
-            let slot = construct_pointer_to_mut::<T>(self.pointer_data, 0);
-            let weight = two_two_the(self.weight_exp.get());
-
-            unsafe {
-                if match *slot {
-                    OrcInner::Some {
-						weight: ref inner_weight,
-						data: _
-					} => inner_weight.fetch_sub(weight, Ordering::Release),
-                    OrcInner::None => unreachable!(),
-                } == weight {
-                    *slot = OrcInner::None;
-                }
-            }
-        }
+        let slot = construct_pointer::<T>(self.pointer_data, 0);
+        let weight = two_two_the(self.weight_exp.get());
+        slot.weight.fetch_sub(weight, Ordering::Release);
     }
 }
 
@@ -83,24 +68,18 @@ impl<'a, T> Deref for Orc<'a, T> {
     #[inline(always)]
     fn deref(&self) -> &T {
         let slot = construct_pointer::<T>(self.pointer_data, 0);
-        match slot {
-            &OrcInner::Some{
-        		weight: _,
-        		data: ref d
-        	} => d,
-            &OrcInner::None => unreachable!(),
+        match slot.data {
+            Some(ref d) => d,
+            None => unreachable!(), // since a reference is in existence
         }
     }
 }
 
 // wrapper around the type T, that is saved in the heap
 //
-enum OrcInner<T> {
-    Some {
-        weight: AtomicUsize,
-        data: T,
-    },
-    None,
+struct OrcInner<T> {
+    weight: AtomicUsize,
+    data: Option<T>,
 }
 
 // The heap that holds all allocated values
@@ -111,28 +90,31 @@ pub struct OrcHeap<T> {
 unsafe impl<'a, T> Sync for OrcHeap<T> {}
 
 impl<'a, T> OrcHeap<T> {
-	/// Creates a new Heap of sensible size (for certain definitions of sensible)
-	/// # Example:
-	/// ```
-	/// use orc::OrcHeap;
-	/// let heap = OrcHeap::<usize>::new();
-	/// ```
+    /// Creates a new Heap of sensible size (for certain definitions of sensible)
+    /// # Example:
+    /// ```
+    /// use orc::OrcHeap;
+    /// let heap = OrcHeap::<usize>::new();
+    /// ```
     pub fn new() -> OrcHeap<T> {
         const DEFAULT_HEAP_SIZE: usize = 16;
         OrcHeap::<T>::with_capacity(DEFAULT_HEAP_SIZE)
     }
 
-	/// Creates a new Heap of a user defined size
-	/// # Example:
-	/// ```
-	/// use orc::OrcHeap;
-	/// let heap = OrcHeap::<usize>::with_capacity(42);
-	/// ```
+    /// Creates a new Heap of a user defined size
+    /// # Example:
+    /// ```
+    /// use orc::OrcHeap;
+    /// let heap = OrcHeap::<usize>::with_capacity(42);
+    /// ```
     pub fn with_capacity(capacity: usize) -> OrcHeap<T> {
         let mut heap = Vec::with_capacity(capacity);
         // it is important that no other push operations on any of theses vectors are performed
         for _ in 0..capacity {
-            heap.push(OrcInner::None);
+            heap.push(OrcInner {
+                weight: AtomicUsize::new(0),
+                data: None,
+            });
         }
         // make sure that all pointers have enough headroom to store the weight
         let (_, weight) = deconstruct_pointer(heap.iter().nth(capacity - 1).unwrap());
@@ -142,37 +124,53 @@ impl<'a, T> OrcHeap<T> {
     }
 
 
-	/// Allocates a Value in the heap.
+    /// Allocates a Value in the heap.
     pub fn alloc(&'a self, value: T) -> Result<Orc<T>, &'static str> {
         // find an empty slot
 
-        if let Some(position) = (&self.heap).iter().position(|x| {
-            match x {
-                &OrcInner::None => true,
-                _ => false,
-            }
-        }) {
+        let mut position = 0;
+        loop {
             unsafe {
-                // create a mutable reference to the slot
-                let slot: *mut OrcInner<T> = transmute(self.heap.get_unchecked(position));
-                // overwrite it. Highly unsafe!
-                *slot = OrcInner::Some {
-                    weight: AtomicUsize::new(two_two_the(MAX_WEIGHT_EXP)),
-                    data: value,
-                };
+                let slot = self.heap.get_unchecked(position);
+                if slot.weight.compare_and_swap(0, MAX_WEIGHT, Ordering::Relaxed) == 0 {
+                    // a little dance to make the gods of borrow checking happy
+                    let ref data: Option<T> = slot.data;
+                    let mut_data: *mut Option<T> = hack_transmute(data);
+                    // overwrite the data
+                    *mut_data = Some(value);
+                    // give out the pointer
+                    let (pointer_data, _) = deconstruct_pointer(slot);
+                    return Ok(Orc::<'a, T> {
+                        pointer_data: pointer_data,
+                        weight_exp: Cell::new(MAX_WEIGHT_EXP),
+                        lifetime_and_type: PhantomData,
+                    });
+                }
+            }
 
-                // extract relevant pointer data
-                let (pointer_data, _) = deconstruct_pointer(self.heap.get_unchecked(position));
-
-                // give out the reference with max weight
-                return Ok(Orc::<'a, T> {
-                    pointer_data: pointer_data,
-                    weight_exp: Cell::new(MAX_WEIGHT_EXP),
-                    lifetime_and_type: PhantomData,
-                });
+            position += 1;
+            if position == self.heap.capacity() {
+                position = 0;
+                // Just for now
+                break;
             }
         }
         Err("Out of memory")
+    }
+
+
+    pub fn collect(&'a self) {
+        for position in 0..self.heap.capacity() {
+            unsafe {
+                let slot = self.heap.get_unchecked(position);
+                if slot.weight.compare_and_swap(0, MAX_WEIGHT, Ordering::Relaxed) == 0 {
+                    let ref data: Option<T> = slot.data;
+                    let mut_data: *mut Option<T> = hack_transmute(data);
+                    // overwrite the data
+                    *mut_data = None;
+                }
+            }
+        }
     }
 }
 
@@ -206,6 +204,15 @@ fn construct_pointer<'a, T>(pointer: [u8; PTR_SIZE - 1], weight: u8) -> &'a OrcI
 #[inline(always)]
 fn two_two_the(exp: u8) -> usize {
     1usize << exp
+}
+
+// use this instead of transmute to work around [E0139]
+#[inline(always)]
+unsafe fn hack_transmute<T, U>(x: T) -> U {
+    debug_assert_eq!(size_of::<T>(), size_of::<U>());
+    let y = transmute_copy(&x);
+    forget(x);
+    y
 }
 
 // unit tests
@@ -245,6 +252,7 @@ mod test_drop {
         for _ in 0..test_size {
             let o = heap.alloc(DropTest(&values_in_existence)).unwrap();
         }
+        heap.collect();
         assert_eq!(values_in_existence.get(), 0);
     }
 
@@ -272,29 +280,29 @@ mod test_drop {
 
 #[cfg(test)]
 mod test_concurrency {
-	// this test may not fail, even if something is wrong with the concurrent
-	// allocation behaviour. But with a high enough test_size, it will most
-	// likely blow up. 
-	extern crate crossbeam;
+    // this test may not fail, even if something is wrong with the concurrent
+    // allocation behaviour. But with a high enough test_size, it will most
+    // likely blow up.
+    extern crate crossbeam;
     use OrcHeap;
 
     #[test]
     fn test_concurrency() {
-    	extern crate crossbeam;
-		let test_size = 1000;
+        extern crate crossbeam;
+        let test_size = 1000;
 
-        let heap = OrcHeap::with_capacity(test_size*10);
+        let heap = OrcHeap::with_capacity(test_size * 10);
 
-		crossbeam::scope(|scope| {
-		    for _ in 0..test_size {
-		        scope.spawn(|| {
-		        	for j in 0..test_size {
-			        	if let Ok(v) = heap.alloc(j) {
-			        		assert_eq!(*v, j);
-			        	}
-		        	}
-		        });
-		    }
-		});
+        crossbeam::scope(|scope| {
+            for _ in 0..test_size {
+                scope.spawn(|| {
+                    for j in 0..test_size {
+                        if let Ok(v) = heap.alloc(j) {
+                            assert_eq!(*v, j);
+                        }
+                    }
+                });
+            }
+        });
     }
 }
