@@ -15,8 +15,7 @@
 use std::mem::{transmute, size_of, transmute_copy, forget};
 use std::ops::Deref;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Mutex;
-use std::marker::PhantomData;
+	use std::marker::PhantomData;
 use std::marker::Sync;
 use std::cell::Cell;
 
@@ -181,14 +180,6 @@ impl<'a, T> OrcHeap<T> {
 fn deconstruct_pointer<T>(p: &OrcInner<T>) -> ([u8; PTR_SIZE - 1], u8) {
     unsafe {
         let p: usize = transmute(p);
-        transmute(usize::from_le(p)) // NOOP on little endian machines
-    }
-}
-
-#[inline(always)]
-fn construct_pointer_to_mut<T>(pointer: [u8; PTR_SIZE - 1], weight: u8) -> *mut OrcInner<T> {
-    unsafe {
-        let p: usize = transmute((pointer, weight));
         transmute(usize::from_le(p)) // NOOP on little endian machines
     }
 }
