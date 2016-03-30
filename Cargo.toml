@@ -1,7 +1,12 @@
 [package]
 name = "orc"
-version = "0.1.0"
-authors = ["tellen <matthias.tellen@gmail.com>"]
+version = "0.0.1"
+authors = ["madmalik <matthias.tellen@gmail.com>"]
+description = "Don't use this yet!"
+repository = "https://github.com/madmalik/orc.rs"
+readme = "README.md"
+keywords = ["gc", "rc", "reference", "counting", "garbage"]
+license = "MIT"
 
 [lib]
 name = "orc"
@@ -9,3 +14,4 @@ path = "src/lib.rs"
 
 [dependencies]
 crossbeam = "0.2.5"
+
