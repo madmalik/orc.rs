@@ -1,3 +1,6 @@
+#![feature(plugin)]
+#![plugin(clippy)]
+
 //! Threadsafe garbage collector (the `Orc<T>` type).
 //!
 //! The Orc<T> type provides shared ownership over an immutable value that is
@@ -276,6 +279,30 @@ mod test_concurrency {
     // likely blow up.
     extern crate crossbeam;
     use OrcHeap;
+
+    #[test]
+    fn test_concurrency() {
+        extern crate crossbeam;
+        let test_size = 1000;
+
+        let heap = OrcHeap::with_capacity(test_size * 10);
+
+        crossbeam::scope(|scope| {
+            for _ in 0..test_size {
+                scope.spawn(|| {
+                    for j in 0..test_size {
+                        if let Ok(v) = heap.alloc(j) {
+                            assert_eq!(*v, j);
+                        }
+                    }
+                });
+            }
+        });
+    }
+}
+
+#[cfg(test)]
+mod test_cycle_collection {
 
     #[test]
     fn test_concurrency() {
