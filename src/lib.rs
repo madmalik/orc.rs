@@ -33,7 +33,7 @@ const PTR_SIZE: usize = 8;
 const MAX_WEIGHT_EXP: u8 = PTR_SIZE as u8 * 8 - 1;
 const MAX_WEIGHT: usize = 1usize << MAX_WEIGHT_EXP; // 2^MAX_WEIGHT_EXP
 
-/// A pointer into an OrcHeap. Can be shared across threads.
+/// A pointer into an `OrcHeap. Can be shared across threads.
 pub struct Orc<'a, T: 'a> {
     pointer_data: [u8; PTR_SIZE - 1], // the ptr is in little endian byteorder
     weight_exp: Cell<u8>,
@@ -67,7 +67,6 @@ impl<'a, T> Clone for Orc<'a, T> {
 impl<'a, T> Deref for Orc<'a, T> {
     type Target = T;
 
-    #[inline(always)]
     fn deref(&self) -> &T {
         let slot = construct_pointer::<T>(self.pointer_data, 0);
         match slot.data {
@@ -136,7 +135,7 @@ impl<'a, T> OrcHeap<T> {
                 let slot = self.heap.get_unchecked(position);
                 if slot.weight.compare_and_swap(0, MAX_WEIGHT, Ordering::Relaxed) == 0 {
                     // a little dance to make the gods of borrow checking happy
-                    let ref data: Option<T> = slot.data;
+                    let data: &Option<T> = &slot.data;
                     let mut_data: *mut Option<T> = hack_transmute(data);
                     // overwrite the data
                     *mut_data = Some(value);
@@ -166,7 +165,7 @@ impl<'a, T> OrcHeap<T> {
             unsafe {
                 let slot = self.heap.get_unchecked(position);
                 if slot.weight.compare_and_swap(0, MAX_WEIGHT, Ordering::Relaxed) == 0 {
-                    let ref data: Option<T> = slot.data;
+                    let data: &Option<T> = &slot.data;
                     let mut_data: *mut Option<T> = hack_transmute(data);
                     // overwrite the data
                     *mut_data = None;
@@ -179,7 +178,6 @@ impl<'a, T> OrcHeap<T> {
 
 // helper functions
 //
-#[inline(always)]
 fn deconstruct_pointer<T>(p: &OrcInner<T>) -> ([u8; PTR_SIZE - 1], u8) {
     unsafe {
         let p: usize = transmute(p);
@@ -187,7 +185,6 @@ fn deconstruct_pointer<T>(p: &OrcInner<T>) -> ([u8; PTR_SIZE - 1], u8) {
     }
 }
 
-#[inline(always)]
 fn construct_pointer<'a, T>(pointer: [u8; PTR_SIZE - 1], weight: u8) -> &'a OrcInner<T> {
     unsafe {
         let p: usize = transmute((pointer, weight));
@@ -195,13 +192,11 @@ fn construct_pointer<'a, T>(pointer: [u8; PTR_SIZE - 1], weight: u8) -> &'a OrcI
     }
 }
 
-#[inline(always)]
 fn two_two_the(exp: u8) -> usize {
     1usize << exp
 }
 
 // use this instead of transmute to work around [E0139]
-#[inline(always)]
 unsafe fn hack_transmute<T, U>(x: T) -> U {
     debug_assert_eq!(size_of::<T>(), size_of::<U>());
     let y = transmute_copy(&x);
@@ -301,26 +296,26 @@ mod test_concurrency {
     }
 }
 
-#[cfg(test)]
-mod test_cycle_collection {
+// #[cfg(test)]
+// mod test_cycle_collection {
 
-    #[test]
-    fn test_concurrency() {
-        extern crate crossbeam;
-        let test_size = 1000;
+//     #[test]
+//     fn test_concurrency() {
+//         extern crate crossbeam;
+//         let test_size = 1000;
 
-        let heap = OrcHeap::with_capacity(test_size * 10);
+//         let heap = OrcHeap::with_capacity(test_size * 10);
 
-        crossbeam::scope(|scope| {
-            for _ in 0..test_size {
-                scope.spawn(|| {
-                    for j in 0..test_size {
-                        if let Ok(v) = heap.alloc(j) {
-                            assert_eq!(*v, j);
-                        }
-                    }
-                });
-            }
-        });
-    }
-}
+//         crossbeam::scope(|scope| {
+//             for _ in 0..test_size {
+//                 scope.spawn(|| {
+//                     for j in 0..test_size {
+//                         if let Ok(v) = heap.alloc(j) {
+//                             assert_eq!(*v, j);
+//                         }
+//                     }
+//                 });
+//             }
+//         });
+//     }
+// }
